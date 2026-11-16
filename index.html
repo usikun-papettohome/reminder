@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="リマインダー">
+<title>鍵つきリマインダー</title>
+<style>
+/* Layout idea: one narrow column for the phone; counts first, then the list grouped by urgency.
+   Fonts are the device's own, so the page loads nothing from outside. */
+:root{
+  --bg:#f2f5f4; --surface:#ffffff; --ink:#17211e; --muted:#5b6964; --line:#d5dedb;
+  --accent:#17695a; --accent-ink:#ffffff;
+  --late:#b3261e; --late-bg:#fbe9e7; --today:#7a5200; --today-bg:#fdf1d6;
+  --font-body:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP",system-ui,sans-serif;
+  --font-display:"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1614; --surface:#18211e; --ink:#e7eeeb; --muted:#9aaba5; --line:#2c3834;
+    --accent:#5cc4ad; --accent-ink:#06211b;
+    --late:#ff8a80; --late-bg:#3a1a17; --today:#f2c26b; --today-bg:#33290f;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1614; --surface:#18211e; --ink:#e7eeeb; --muted:#9aaba5; --line:#2c3834;
+  --accent:#5cc4ad; --accent-ink:#06211b;
+  --late:#ff8a80; --late-bg:#3a1a17; --today:#f2c26b; --today-bg:#33290f;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:16px;line-height:1.6;-webkit-text-size-adjust:100%}
+main{max-width:560px;margin:0 auto;padding:20px 16px 48px;display:flex;flex-direction:column;gap:16px}
+h1{font-family:var(--font-display);font-size:1.35rem;font-weight:700;margin:0;text-wrap:balance}
+h2{font-family:var(--font-display);font-size:.95rem;font-weight:700;margin:0;color:var(--muted)}
+p{margin:0}
+.muted{color:var(--muted);font-size:.875rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+label{display:flex;flex-direction:column;gap:4px;font-size:.875rem;color:var(--muted)}
+input,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px 12px;width:100%;min-height:44px}
+textarea{resize:vertical;min-height:72px}
+button{font:inherit;min-height:44px;padding:8px 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+button.danger{color:var(--late);border-color:var(--late)}
+button:disabled{opacity:.55;cursor:default}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1 1 auto}
+.head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.msg{font-size:.875rem;color:var(--late);min-height:1.4em}
+.msg.ok{color:var(--accent)}
+.note{background:var(--today-bg);color:var(--today);border-radius:8px;padding:10px 12px;font-size:.875rem}
+.counts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.count{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.count b{display:block;font-size:1.5rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.count span{font-size:.8rem;color:var(--muted)}
+.count.late b{color:var(--late)}
+.count.today b{color:var(--today)}
+.group{display:flex;flex-direction:column;gap:8px}
+.item{background:var(--surface);border:1px solid var(--line);border-left-width:5px;border-radius:10px;padding:10px 12px;display:flex;gap:12px;align-items:flex-start}
+.item.late{border-left-color:var(--late)}
+.item.today{border-left-color:var(--today)}
+.item.later{border-left-color:var(--accent)}
+.item.done{opacity:.65}
+.item.done .title{text-decoration:line-through}
+.check{flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0;border-radius:50%;font-size:1.1rem;line-height:1}
+.item.done .check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.body{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+.title{font-weight:700;overflow-wrap:anywhere}
+.due{font-size:.875rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.item.late .due{color:var(--late)}
+.item.today .due{color:var(--today)}
+.memo{font-size:.875rem;color:var(--muted);overflow-wrap:anywhere;white-space:pre-wrap}
+.acts{display:flex;gap:8px;margin-top:6px}
+.acts button{min-height:36px;padding:4px 12px;font-size:.875rem}
+.empty{text-align:center;color:var(--muted);padding:24px 8px}
+.small{min-height:36px;padding:4px 10px;font-size:.8rem;flex:0 0 auto}
+.icon{flex:0 0 40px;width:40px;height:40px;min-height:40px;padding:0;margin-right:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:var(--muted)}
+.head{flex-wrap:wrap}
+.head h1{white-space:nowrap}
+.head .row{flex-wrap:nowrap;align-items:center}
+.head .primary{padding:8px 14px}
+.compact{font-size:.875rem;gap:10px;padding:14px}
+.compact h1{font-size:1.05rem}
+.compact h2{font-size:.85rem;margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+.compact .muted,.compact label{font-size:.8rem}
+.compact button,.compact input{min-height:40px}
+.compact textarea{min-height:52px}
+details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700}
+details .inner{display:flex;flex-direction:column;gap:12px;padding-top:4px}
+</style>
+</head>
+<body>
+<main>
+
+  <p class="note" id="preview-note" hidden>これはお試し表示です。この画面で保存したデータは消えることがあります。ふだん使いには、専用のURLへの設置が必要です。</p>
+  <p class="note" id="storage-note" hidden>この環境ではデータを保存できません。画面を閉じると内容は消えます。</p>
+
+  <!-- 初回設定 -->
+  <section id="setup" class="card" hidden>
+    <h1>鍵つきリマインダー</h1>
+    <p>最初にパスコードを決めてください。リマインダーはこのパスコードで暗号化され、この端末の中だけに保存されます。</p>
+    <p class="note">パスコードを忘れると、データは誰にも復元できません。</p>
+    <form id="setup-form" autocomplete="off">
+      <div class="group">
+        <label for="setup-p1">パスコード（8文字以上）
+          <input id="setup-p1" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <label for="setup-p2">もう一度入力
+          <input id="setup-p2" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <p class="muted" id="setup-strength">長いほど安全です。12文字以上をおすすめします。</p>
+        <p class="msg" id="setup-msg" role="alert"></p>
+        <button class="primary" id="setup-go" type="submit">このパスコードで始める</button>
+      </div>
+    </form>
+    <details>
+      <summary>バックアップから復元する</summary>
+      <div class="inner">
+        <label for="setup-restore-text">バックアップの文字列を貼り付け
+          <textarea id="setup-restore-text" spellcheck="false"></textarea>
+        </label>
+        <p class="msg" id="setup-restore-msg" role="alert"></p>
+        <button id="setup-restore-go" type="button">復元する</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- ロック解除 -->
+  <section id="unlock" class="card" hidden>
+    <h1>鍵つきリマインダー</h1>
+    <p>パスコードを入力してください。</p>
+    <form id="unlock-form" autocomplete="off">
+      <div class="group">
+        <label for="unlock-p">パスコード
+          <input id="unlock-p" type="password" autocomplete="current-password" required>
+        </label>
+        <p class="msg" id="unlock-msg" role="alert"></p>
+        <button class="primary" id="unlock-go" type="submit">ロックを解除</button>
+      </div>
+    </form>
+    <details>
+      <summary>パスコードを忘れたとき</summary>
+      <div class="inner">
+        <p class="muted">パスコードなしでデータを取り出す方法はありません。すべて消して最初からやり直すことはできます。</p>
+        <button class="danger" id="unlock-wipe" type="button">すべて消してやり直す</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- 本体 -->
+  <section id="app" class="group" hidden>
+    <div class="head">
+      <h1>リマインダー</h1>
+      <div class="row">
+        <button id="settings-open" class="icon" type="button" aria-label="設定" title="設定"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6.5" stroke-width="2"/><circle cx="12" cy="12" r="2.4" stroke-width="2"/><path stroke-width="2.6" d="M18.5 12h3M16.6 16.6l2.12 2.12M12 18.5v3M7.4 16.6l-2.12 2.12M5.5 12h-3M7.4 7.4 5.28 5.28M12 5.5v-3M16.6 7.4l2.12-2.12"/></svg></button>
+        <button id="lock-now" class="small" type="button">ロック</button>
+        <button class="primary" id="add-open" type="button">追加</button>
+      </div>
+    </div>
+
+    <div id="view-list" class="group">
+    <div class="counts" aria-label="件数">
+      <div class="count late"><b id="n-late">0</b><span>期限切れ</span></div>
+      <div class="count today"><b id="n-today">0</b><span>今日</span></div>
+      <div class="count"><b id="n-later">0</b><span>明日以降</span></div>
+    </div>
+
+    <form id="edit-form" class="card" autocomplete="off" hidden>
+      <h2 id="edit-heading">リマインダーを追加</h2>
+      <label for="edit-title">やること
+        <input id="edit-title" type="text" maxlength="120" required>
+      </label>
+      <label for="edit-due">日時
+        <input id="edit-due" type="datetime-local" required>
+      </label>
+      <label for="edit-memo">メモ（任意）
+        <textarea id="edit-memo" maxlength="500"></textarea>
+      </label>
+      <p class="msg" id="edit-msg" role="alert"></p>
+      <div class="row">
+        <button id="edit-cancel" type="button">やめる</button>
+        <button class="primary" type="submit">保存</button>
+      </div>
+    </form>
+
+    <p class="msg" id="app-msg" role="status"></p>
+    <div id="list" class="group"></div>
+    </div>
+
+    <div id="view-settings" class="card compact" hidden>
+        <div class="head">
+          <h1>設定とバックアップ</h1>
+          <button id="settings-close" class="small" type="button">リストに戻る</button>
+        </div>
+        <h2>バックアップ</h2>
+        <p class="muted">暗号化されたままの文字列をコピーします。メモアプリなどに貼って保管してください。復元にはそのときのパスコードが必要です。</p>
+        <button id="backup-copy" type="button">バックアップをコピー</button>
+        <label for="backup-text" id="backup-text-label" hidden>コピーできなかったため、下の文字列を手動でコピーしてください
+          <textarea id="backup-text" readonly spellcheck="false"></textarea>
+        </label>
+        <label for="restore-text">バックアップから復元（今のデータと入れ替わります）
+          <textarea id="restore-text" spellcheck="false"></textarea>
+        </label>
+        <button class="danger" id="restore-go" type="button">復元する</button>
+        <p class="msg" id="backup-msg" role="status"></p>
+
+        <h2>パスコードの変更</h2>
+        <form id="pass-form" autocomplete="off" class="group">
+          <label for="pass-cur">今のパスコード
+            <input id="pass-cur" type="password" autocomplete="current-password" required>
+          </label>
+          <label for="pass-n1">新しいパスコード（8文字以上）
+            <input id="pass-n1" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <label for="pass-n2">もう一度入力
+            <input id="pass-n2" type="password" autocomplete="new-password" minlength="8" required>
+          </label>
+          <p class="msg" id="pass-msg" role="status"></p>
+          <button id="pass-go" type="submit">パスコードを変更</button>
+        </form>
+
+        <h2>データの削除</h2>
+        <button class="danger" id="wipe" type="button">すべてのデータを削除</button>
+
+        <h2>このアプリの守り方</h2>
+        <p class="muted">データはAES-256で暗号化し、この端末のブラウザ内だけに保存します。外部への通信は行いません。画面を1分以上離れるか、5分間操作がないと自動でロックします。</p>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+'use strict';
+const KEY = 'reminder-vault.v1', FAIL = 'reminder-vault.fail', ITER = 600000;
+const $ = id => document.getElementById(id);
+
+/*CRYPTO-START*/
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = u8 => { let s = ''; for (const b of u8) s += String.fromCharCode(b); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const rand = n => crypto.getRandomValues(new Uint8Array(n));
+async function deriveKey(pass, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function seal(key, salt, iter, obj) {
+  const iv = rand(12);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
+  return JSON.stringify({ v: 1, kdf: 'PBKDF2-SHA256', iter, salt: b64(salt), iv: b64(iv), ct: b64(new Uint8Array(ct)) });
+}
+function parseBox(text) {
+  const box = JSON.parse(text);
+  if (!box || box.v !== 1 || typeof box.salt !== 'string' || typeof box.iv !== 'string' ||
+      typeof box.ct !== 'string' || !Number.isInteger(box.iter) || box.iter < 100000 || box.iter > 5000000) {
+    throw new Error('bad box');
+  }
+  return box;
+}
+async function openBox(pass, text) {
+  const box = parseBox(text);
+  const salt = unb64(box.salt);
+  const key = await deriveKey(pass, salt, box.iter);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(box.iv) }, key, unb64(box.ct));
+  return { key, salt, iter: box.iter, data: JSON.parse(dec.decode(pt)) };
+}
+/*CRYPTO-END*/
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+
+let key = null, salt = null, iter = ITER, data = null, editId = null;
+let hiddenAt = 0, idleTimer = 0, tick = 0;
+
+function show(name) {
+  for (const id of ['setup', 'unlock', 'app']) $(id).hidden = id !== name;
+}
+function say(id, text, ok) {
+  const n = $(id); n.textContent = text || ''; n.classList.toggle('ok', !!ok);
+}
+function twoStep(btn, run) {
+  const label = btn.textContent; let armed = false, t = 0;
+  btn.addEventListener('click', () => {
+    if (!armed) {
+      armed = true; btn.textContent = 'もう一度押すと実行します';
+      t = setTimeout(() => { armed = false; btn.textContent = label; }, 4000);
+      return;
+    }
+    clearTimeout(t); armed = false; btn.textContent = label; run();
+  });
+}
+async function busy(btn, fn) {
+  const label = btn.textContent; btn.disabled = true; btn.textContent = '処理中…';
+  try { return await fn(); } finally { btn.disabled = false; btn.textContent = label; }
+}
+
+async function save() {
+  const text = await seal(key, salt, iter, data);
+  if (!store.set(KEY, text)) $('storage-note').hidden = false;
+}
+
+function lock(message) {
+  key = null; salt = null; data = null; editId = null;
+  clearTimeout(idleTimer); clearInterval(tick);
+  $('list').replaceChildren();
+  $('edit-form').hidden = true; $('edit-form').reset();
+  $('pass-form').reset(); $('restore-text').value = ''; $('backup-text').value = '';
+  $('backup-text-label').hidden = true;
+  $('unlock-p').value = '';
+  say('unlock-msg', message || '', true);
+  show(store.get(KEY) ? 'unlock' : 'setup');
+}
+function showView(v) {
+  $('view-list').hidden = v !== 'list';
+  $('view-settings').hidden = v !== 'settings';
+}
+function touch() {
+  clearTimeout(idleTimer);
+  if (key) idleTimer = setTimeout(() => lock('しばらく操作がなかったため、ロックしました。'), 5 * 60 * 1000);
+}
+function enter() {
+  show('app'); showView('list'); render(); touch();
+  clearInterval(tick); tick = setInterval(() => { if (key) render(); }, 60000);
+}
+
+/* ---------- 表示 ---------- */
+const fmt = new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+function render() {
+  const now = new Date();
+  const eod = new Date(now); eod.setHours(24, 0, 0, 0);
+  const g = { late: [], today: [], later: [], done: [] };
+  for (const r of data.reminders) {
+    if (r.done) { g.done.push(r); continue; }
+    const d = new Date(r.due);
+    (d < now ? g.late : d < eod ? g.today : g.later).push(r);
+  }
+  const byDue = (a, b) => a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
+  g.late.sort(byDue); g.today.sort(byDue); g.later.sort(byDue);
+  g.done.sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+  $('n-late').textContent = g.late.length;
+  $('n-today').textContent = g.today.length;
+  $('n-later').textContent = g.later.length;
+
+  const list = $('list'); list.replaceChildren();
+  if (!data.reminders.length) {
+    list.append(el('p', 'empty', 'まだリマインダーがありません。「追加」から登録できます。'));
+    return;
+  }
+  const names = { late: '期限切れ', today: '今日', later: '明日以降', done: '完了' };
+  for (const k of ['late', 'today', 'later', 'done']) {
+    if (!g[k].length) continue;
+    const sec = el('section', 'group');
+    sec.append(el('h2', '', names[k] + '（' + g[k].length + '）'));
+    for (const r of g[k]) sec.append(itemNode(r, k));
+    list.append(sec);
+  }
+}
+function itemNode(r, kind) {
+  const row = el('div', 'item ' + kind);
+  const check = el('button', 'check', r.done ? '✓' : '');
+  check.type = 'button';
+  check.setAttribute('aria-label', r.done ? '未完了に戻す' : '完了にする');
+  check.addEventListener('click', async () => {
+    r.done = !r.done; r.doneAt = r.done ? Date.now() : 0;
+    await save(); render();
+  });
+  const body = el('div', 'body');
+  body.append(el('span', 'title', r.title));
+  const d = new Date(r.due);
+  body.append(el('span', 'due', isNaN(d) ? '' : fmt.format(d)));
+  if (r.memo) body.append(el('span', 'memo', r.memo));
+  const acts = el('div', 'acts');
+  const edit = el('button', '', '編集'); edit.type = 'button';
+  edit.addEventListener('click', () => openForm(r));
+  const del = el('button', 'danger', '削除'); del.type = 'button';
+  twoStep(del, async () => {
+    data.reminders = data.reminders.filter(x => x.id !== r.id);
+    await save(); render();
+  });
+  acts.append(edit, del); body.append(acts);
+  row.append(check, body);
+  return row;
+}
+
+/* ---------- 追加・編集 ---------- */
+const pad = n => String(n).padStart(2, '0');
+function localValue(d) {
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function openForm(r) {
+  showView('list');
+  editId = r ? r.id : null;
+  $('edit-heading').textContent = r ? 'リマインダーを編集' : 'リマインダーを追加';
+  $('edit-title').value = r ? r.title : '';
+  $('edit-memo').value = r ? (r.memo || '') : '';
+  if (r) { $('edit-due').value = r.due; }
+  else { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0); $('edit-due').value = localValue(d); }
+  say('edit-msg', '');
+  $('edit-form').hidden = false;
+  $('edit-title').focus();
+}
+$('settings-open').addEventListener('click', () => { $('edit-form').hidden = true; showView('settings'); });
+$('settings-close').addEventListener('click', () => showView('list'));
+$('add-open').addEventListener('click', () => openForm(null));
+$('edit-cancel').addEventListener('click', () => { $('edit-form').hidden = true; });
+$('edit-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const title = $('edit-title').value.trim(), due = $('edit-due').value, memo = $('edit-memo').value.trim();
+  if (!title) return say('edit-msg', 'やることを入力してください。');
+  if (!due || isNaN(new Date(due))) return say('edit-msg', '日時を選んでください。');
+  if (editId) {
+    const r = data.reminders.find(x => x.id === editId);
+    if (r) { r.title = title; r.due = due; r.memo = memo; }
+  } else {
+    data.reminders.push({ id: b64(rand(9)), title, due, memo, done: false, doneAt: 0, created: Date.now() });
+  }
+  await save();
+  $('edit-form').hidden = true; render();
+});
+
+/* ---------- 初回設定 ---------- */
+$('setup-p1').addEventListener('input', () => {
+  const n = $('setup-p1').value.length;
+  $('setup-strength').textContent = n === 0 ? '長いほど安全です。12文字以上をおすすめします。'
+    : n < 8 ? 'あと' + (8 - n) + '文字必要です。'
+    : n < 12 ? '使えます。12文字以上にするとより安全です。' : '十分な長さです。';
+});
+$('setup-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const p1 = $('setup-p1').value, p2 = $('setup-p2').value;
+  if (p1.length < 8) return say('setup-msg', 'パスコードは8文字以上にしてください。');
+  if (p1 !== p2) return say('setup-msg', '2つのパスコードが一致しません。');
+  try {
+    await busy($('setup-go'), async () => {
+      salt = rand(16); iter = ITER; key = await deriveKey(p1, salt, iter);
+      data = { reminders: [] };
+      await save();
+    });
+  } catch (err) { key = null; return say('setup-msg', '暗号化を開始できませんでした。Safariの最新版でお試しください。'); }
+  $('setup-form').reset(); say('setup-msg', '');
+  enter();
+});
+
+/* ---------- ロック解除 ---------- */
+function failState() {
+  try { const f = JSON.parse(store.get(FAIL) || ''); if (f && typeof f.n === 'number') return f; } catch (e) {}
+  return { n: 0, until: 0 };
+}
+$('unlock-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = failState(), wait = f.until - Date.now();
+  if (wait > 0) return say('unlock-msg', '入力の間違いが続いています。' + Math.ceil(wait / 1000) + '秒待ってからお試しください。');
+  const pass = $('unlock-p').value;
+  let res = null;
+  try { res = await busy($('unlock-go'), () => openBox(pass, store.get(KEY) || '')); } catch (err) { res = null; }
+  if (!res || !res.data || !Array.isArray(res.data.reminders)) {
+    f.n += 1;
+    f.until = f.n >= 5 ? Date.now() + Math.min(30000 * Math.pow(2, f.n - 5), 15 * 60 * 1000) : 0;
+    store.set(FAIL, JSON.stringify(f));
+    $('unlock-p').value = '';
+    return say('unlock-msg', 'パスコードが違います。');
+  }
+  store.del(FAIL);
+  key = res.key; salt = res.salt; iter = res.iter; data = res.data;
+  $('unlock-p').value = ''; say('unlock-msg', '');
+  enter();
+});
+
+function wipeAll() {
+  store.del(KEY); store.del(FAIL);
+  lock('');
+}
+twoStep($('unlock-wipe'), wipeAll);
+twoStep($('wipe'), wipeAll);
+$('lock-now').addEventListener('click', () => lock(''));
+
+/* ---------- バックアップ ---------- */
+$('backup-copy').addEventListener('click', () => {
+  const text = store.get(KEY) || '';
+  if (!text) return say('backup-msg', 'バックアップするデータがありません。');
+  const manual = () => {
+    $('backup-text').value = text; $('backup-text-label').hidden = false;
+    say('backup-msg', '');
+  };
+  try {
+    navigator.clipboard.writeText(text).then(
+      () => say('backup-msg', 'コピーしました。メモアプリなどに貼り付けて保管してください。', true), manual);
+  } catch (err) { manual(); }
+});
+function restore(text, msgId) {
+  try { parseBox(text.trim()); } catch (err) { say(msgId, 'バックアップの文字列として読み取れませんでした。'); return false; }
+  if (!store.set(KEY, text.trim())) { say(msgId, 'この環境では保存できませんでした。'); return false; }
+  store.del(FAIL);
+  lock('バックアップを読み込みました。バックアップしたときのパスコードで解除してください。');
+  return true;
+}
+twoStep($('restore-go'), () => restore($('restore-text').value, 'backup-msg'));
+$('setup-restore-go').addEventListener('click', () => {
+  if (restore($('setup-restore-text').value, 'setup-restore-msg')) $('setup-restore-text').value = '';
+});
+
+/* ---------- パスコード変更 ---------- */
+$('pass-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const cur = $('pass-cur').value, n1 = $('pass-n1').value, n2 = $('pass-n2').value;
+  if (n1.length < 8) return say('pass-msg', '新しいパスコードは8文字以上にしてください。');
+  if (n1 !== n2) return say('pass-msg', '新しいパスコードが一致しません。');
+  try {
+    await busy($('pass-go'), async () => {
+      await openBox(cur, store.get(KEY) || '');
+      const s = rand(16), k = await deriveKey(n1, s, ITER);
+      salt = s; iter = ITER; key = k;
+      await save();
+    });
+  } catch (err) { return say('pass-msg', '今のパスコードが違います。'); }
+  $('pass-form').reset();
+  say('pass-msg', 'パスコードを変更しました。以前のバックアップは、以前のパスコードで開きます。', true);
+});
+
+/* ---------- 自動ロック ---------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (key && hiddenAt && Date.now() - hiddenAt > 60000) lock('画面を離れていたため、ロックしました。');
+  else if (key) render();
+});
+for (const ev of ['pointerdown', 'keydown', 'input']) document.addEventListener(ev, touch, { passive: true });
+
+/* ---------- 起動 ---------- */
+let framed = false;
+try { framed = window.self !== window.top; } catch (e) { framed = true; }
+$('preview-note').hidden = !framed;
+try { localStorage.setItem('reminder-vault.probe', '1'); localStorage.removeItem('reminder-vault.probe'); }
+catch (e) { $('storage-note').hidden = false; }
+if (!window.crypto || !crypto.subtle) {
+  show('setup'); $('setup-go').disabled = true;
+  say('setup-msg', 'このブラウザでは暗号化が使えません。Safariの最新版で、https のURLから開いてください。');
+} else {
+  show(store.get(KEY) ? 'unlock' : 'setup');
+}
+})();
+</script>
+</body>
+</html>
